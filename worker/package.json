@@ -1,0 +1,16 @@
+{
+  "name": "cli-tools-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --experimental-strip-types --test src/util.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260714.1",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.24.0"
+  }
+}

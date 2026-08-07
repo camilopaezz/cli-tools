@@ -1,0 +1,43 @@
+# cli-tools worker
+
+Cloudflare Worker + R2: authenticated upload, public GET with TTL.
+
+## Setup
+
+```bash
+# create bucket (once)
+npx wrangler r2 bucket create cli-tools
+
+# secret
+npx wrangler secret put UPLOAD_TOKEN
+
+# deploy
+npm install
+npm run deploy
+```
+
+### Custom domain
+
+In Cloudflare dashboard → Workers → `cli-tools` → Settings → Domains & Routes:
+add `cli-tools.cpzhmlb.lat` (zone must be on the same account).
+
+### R2 lifecycle (31d backstop)
+
+Dashboard → R2 → `cli-tools` → Settings → Object lifecycle rules:
+add rule delete objects after **31 days**. (Not set via wrangler.toml easily; dashboard is fine.)
+
+## API
+
+- `POST /v1/upload?ttl=7d` — `Authorization: Bearer <token>`, raw body, `Content-Type` one of:
+  `text/html`, `text/html; charset=utf-8`, `image/webp`, `image/png`, `image/jpeg`, `image/jpg`
+  - HTML max 2MB; images max 5MB
+  - default TTL `7d`, max `30d` (`Nh` / `Nd`)
+  - `200` `{ "url", "expires_at" }`
+- `GET /YYYY-MM-DD/<uuid>` — public; expired → 404 + best-effort delete
+
+## Local
+
+```bash
+npm test
+npm run dev   # needs local R2 / remote binding
+```
