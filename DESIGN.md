@@ -20,9 +20,9 @@ Non-goals (v1): multi-user, list/delete, CORS/web upload, homelab, CSP, resize, 
 
 | Piece | Value |
 |-------|--------|
-| Host | `https://cli-tools.cpzhmlb.lat` |
+| Host | `https://cli-tools.cpzhmlb.uk` |
 | Object path | `/YYYY-MM-DD/<uuid>` (UTC date of upload, UUID v4) |
-| Example | `https://cli-tools.cpzhmlb.lat/2026-07-17/550e8400-e29b-41d4-a716-446655440000` |
+| Example | `https://cli-tools.cpzhmlb.uk/2026-07-17/550e8400-e29b-41d4-a716-446655440000` |
 | No file extension in URL | Content-Type from stored metadata |
 
 ## CLI
@@ -87,7 +87,7 @@ cli-tools image <file>        [--ttl 7d] [--quality 80] [--no-compress]
 
 ### Base URL
 
-- Hardcoded default: `https://cli-tools.cpzhmlb.lat`
+- Hardcoded default: `https://cli-tools.cpzhmlb.uk`
 - Optional override: env `CLI_TOOLS_BASE_URL` only
 
 ## Worker (Cloudflare)
@@ -120,7 +120,7 @@ No CORS (CLI only). No list/delete APIs.
 
 ```json
 {
-  "url": "https://cli-tools.cpzhmlb.lat/2026-07-17/<uuid>",
+  "url": "https://cli-tools.cpzhmlb.uk/2026-07-17/<uuid>",
   "expires_at": "2026-07-24T12:00:00.000Z"
 }
 ```
@@ -175,7 +175,7 @@ Keep packages flat; no extra abstraction layers.
 ## Implementation order (when building)
 
 1. Worker: auth, upload, get, expiry metadata, size/ttl checks
-2. R2 bucket + secret + custom domain `cli-tools.cpzhmlb.lat`
+2. R2 bucket + secret + custom domain `cli-tools.cpzhmlb.uk`
 3. Go CLI: auth config, plan, image+webp, flags
 4. Manual smoke: plan HTML + png → open URLs → wait/expire check
 
@@ -183,7 +183,7 @@ Keep packages flat; no extra abstraction layers.
 
 - Exact TTL header vs query param (prefer `?ttl=`)
 - Go WebP library choice (prefer pure Go / easy module)
-- wrangler account/zone wiring for `cpzhmlb.lat`
+- wrangler account/zone wiring for `cpzhmlb.uk`
 - Whether `auth set` reads token from stdin when not passed as arg
 
 ## Locked decisions log
@@ -198,7 +198,7 @@ Keep packages flat; no extra abstraction layers.
 | 6 | Image → WebP q80; png/jpg/webp; no resize; no gif |
 | 7 | Plan: local html/htm only, as-is |
 | 8 | Auth: env > JSON config; `auth set\|status\|clear` |
-| 9 | Host `cli-tools.cpzhmlb.lat` |
+| 9 | Host `cli-tools.cpzhmlb.uk` |
 | 10 | Size: plan 2MB; image 10MB in / 5MB out |
 | 11 | Monorepo |
 | 12 | Go CLI, binary `cli-tools` |

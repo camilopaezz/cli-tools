@@ -19,7 +19,7 @@ npm run deploy
 ### Custom domain
 
 In Cloudflare dashboard → Workers → `cli-tools` → Settings → Domains & Routes:
-add `cli-tools.cpzhmlb.lat` (zone must be on the same account).
+add `cli-tools.cpzhmlb.uk` (zone must be on the same account).
 
 ### R2 lifecycle (31d backstop)
 

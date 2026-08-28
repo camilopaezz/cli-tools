@@ -66,7 +66,7 @@ async function handleUpload(request: Request, env: Env, url: URL): Promise<Respo
     customMetadata: { "expires-at": String(expiresAtSec) },
   });
 
-  const base = (env.PUBLIC_BASE_URL || "https://cli-tools.cpzhmlb.lat").replace(/\/$/, "");
+  const base = (env.PUBLIC_BASE_URL || "https://cli-tools.cpzhmlb.uk").replace(/\/$/, "");
   return json(
     {
       url: `${base}/${key}`,

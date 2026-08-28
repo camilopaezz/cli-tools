@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://cli-tools.cpzhmlb.lat"
+	defaultBaseURL = "https://cli-tools.cpzhmlb.uk"
 	defaultTTL     = "7d"
 	maxTTL         = 30 * 24 * time.Hour
 	maxPlanSize    = 2 << 20  // 2 MB

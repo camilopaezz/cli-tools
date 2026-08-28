@@ -4,7 +4,7 @@ compatibility_date = "2026-07-17"
 workers_dev = true
 
 routes = [
-  { pattern = "cli-tools.cpzhmlb.lat", custom_domain = true }
+  { pattern = "cli-tools.cpzhmlb.uk", custom_domain = true }
 ]
 
 [[r2_buckets]]
@@ -12,4 +12,4 @@ binding = "BUCKET"
 bucket_name = "cli-tools"
 
 [vars]
-PUBLIC_BASE_URL = "https://cli-tools.cpzhmlb.lat"
+PUBLIC_BASE_URL = "https://cli-tools.cpzhmlb.uk"
