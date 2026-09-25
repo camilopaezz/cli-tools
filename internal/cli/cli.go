@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"flag"
@@ -25,14 +26,16 @@ import (
 )
 
 const (
-	defaultBaseURL = "https://cli-tools.cpzhmlb.uk"
-	defaultTTL     = "7d"
-	maxTTL         = 30 * 24 * time.Hour
-	maxPlanSize    = 2 << 20  // 2 MB
-	maxImageIn     = 10 << 20 // 10 MB
-	maxImageOut    = 5 << 20  // 5 MB
-	maxVideoSize        = 50 << 20 // 50 MB upload cap
-	videoReencodeOver   = 10 << 20 // re-encode locally if larger
+	defaultBaseURL    = "https://cli-tools.cpzhmlb.uk"
+	defaultTTL        = "7d"
+	maxTTL            = 30 * 24 * time.Hour
+	maxPlanSize       = 2 << 20   // 2 MB
+	maxImageIn        = 10 << 20  // 10 MB
+	maxImageOut       = 5 << 20   // 5 MB
+	maxVideoSize      = 50 << 20  // 50 MB upload cap
+	maxFileSize       = 100 << 20 // 100 MiB upload cap
+	defaultFileTTL    = "24h"
+	videoReencodeOver = 10 << 20 // re-encode locally if larger
 )
 
 type Config struct {
@@ -42,7 +45,7 @@ type Config struct {
 // Run is the CLI entry for args after the binary name.
 func Run(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: cli-tools <auth|plan|image|video> ...")
+		return fmt.Errorf("usage: cli-tools <auth|plan|image|video|file> ...")
 	}
 	switch args[0] {
 	case "auth":
@@ -53,6 +56,8 @@ func Run(args []string) error {
 		return runImage(args[1:])
 	case "video":
 		return runVideo(args[1:])
+	case "file":
+		return runFile(args[1:])
 	default:
 		return fmt.Errorf("unknown command %q", args[0])
 	}
@@ -347,6 +352,48 @@ func runImage(args []string) error {
 	return upload(out, "image/webp", ttl)
 }
 
+func runFile(args []string) error {
+	fs := flag.NewFlagSet("file", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	ttlFlag := fs.String("ttl", defaultFileTTL, "ttl Nh/Nd")
+	if err := fs.Parse(reorderFlags(args)); err != nil {
+		return fmt.Errorf("file: %w", err)
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: cli-tools file <path> [--ttl 24h]")
+	}
+	ttl, err := ParseTTL(*ttlFlag)
+	if err != nil {
+		return err
+	}
+	path := fs.Arg(0)
+	st, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if err := validateFileSize(st.Size()); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if err := validateFileSize(int64(len(data))); err != nil {
+		return err
+	}
+	return upload(data, "application/octet-stream", ttl, filepath.Base(path))
+}
+
+func validateFileSize(size int64) error {
+	if size == 0 {
+		return fmt.Errorf("empty file")
+	}
+	if size > maxFileSize {
+		return fmt.Errorf("file exceeds 100 MiB")
+	}
+	return nil
+}
+
 // runVideo uploads mp4/webm/mov. Over 10MB: try local ffmpeg re-encode (no CF Stream).
 func runVideo(args []string) error {
 	fs := flag.NewFlagSet("video", flag.ContinueOnError)
@@ -527,7 +574,7 @@ type uploadResp struct {
 	URL string `json:"url"`
 }
 
-func upload(body []byte, contentType, ttl string) error {
+func upload(body []byte, contentType, ttl string, filename ...string) error {
 	token, err := ResolveToken()
 	if err != nil {
 		return err
@@ -539,6 +586,9 @@ func upload(body []byte, contentType, ttl string) error {
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", contentType)
+	if len(filename) > 0 && filename[0] != "" {
+		req.Header.Set("X-Download-Filename", base64.RawURLEncoding.EncodeToString([]byte(filename[0])))
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

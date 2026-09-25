@@ -1,5 +1,8 @@
 import {
   ALLOWED_TYPES,
+  contentDispositionFor,
+  decodeDownloadFilename,
+  downloadContentDisposition,
   isObjectPath,
   maxBytesFor,
   parseTtl,
@@ -50,21 +53,100 @@ async function handleUpload(request: Request, env: Env, url: URL): Promise<Respo
     return json({ error: "unsupported content-type" }, 400);
   }
 
-  const ttl = parseTtl(url.searchParams.get("ttl"));
+  const ttl = parseTtl(url.searchParams.get("ttl"), contentType);
   if (!ttl.ok) return json({ error: ttl.error }, 400);
 
   const max = maxBytesFor(contentType)!;
-  const body = await request.arrayBuffer();
-  if (body.byteLength === 0) return json({ error: "empty body" }, 400);
-  if (body.byteLength > max) return json({ error: "payload too large" }, 413);
+  const isGeneric = contentType === "application/octet-stream";
+  const contentLengthHeader = request.headers.get("Content-Length");
+  let contentLength: number | null = null;
+  if (isGeneric) {
+    if (contentLengthHeader === null) {
+      return json({ error: "content-length required for application/octet-stream" }, 411);
+    }
+    if (!/^\d+$/.test(contentLengthHeader)) {
+      return json({ error: "invalid content-length" }, 400);
+    }
+    contentLength = Number(contentLengthHeader);
+    if (!Number.isSafeInteger(contentLength)) return json({ error: "invalid content-length" }, 400);
+    if (contentLength === 0) return json({ error: "empty body" }, 400);
+  } else if (contentLengthHeader && /^\d+$/.test(contentLengthHeader) && Number(contentLengthHeader) > max) {
+    return json({ error: "payload too large" }, 413);
+  }
+  if (contentLength !== null && contentLength > max) {
+    return json({ error: "payload too large" }, 413);
+  }
+  if (!request.body) return json({ error: "empty body" }, 400);
 
   const key = `${utcDatePrefix()}/${crypto.randomUUID()}`;
   const expiresAtSec = Math.floor(Date.now() / 1000) + ttl.seconds;
-
-  await env.BUCKET.put(key, body, {
+  const downloadFilename = isGeneric
+    ? decodeDownloadFilename(request.headers.get("X-Download-Filename"))
+    : null;
+  const customMetadata: Record<string, string> = { "expires-at": String(expiresAtSec) };
+  if (downloadFilename) customMetadata["download-filename"] = downloadFilename;
+  const putOptions = {
     httpMetadata: { contentType },
-    customMetadata: { "expires-at": String(expiresAtSec) },
-  });
+    customMetadata,
+  };
+
+  if (isGeneric) {
+    // R2 requires a known stream length. FixedLengthStream supplies it while the transform
+    // independently verifies the actual byte count before forwarding each chunk.
+    const fixedLength = new FixedLengthStream(contentLength!);
+    let received = 0;
+    let tooLarge = false;
+    let empty = false;
+    let lengthMismatch = false;
+    const countedBody = request.body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          received += chunk.byteLength;
+          if (received > max) {
+            tooLarge = true;
+            controller.error(new Error("payload too large"));
+            return;
+          }
+          if (received > contentLength!) {
+            lengthMismatch = true;
+            controller.error(new Error("content-length mismatch"));
+            return;
+          }
+          if (chunk.byteLength > 0) controller.enqueue(chunk);
+        },
+        flush() {
+          if (received === 0) {
+            empty = true;
+            throw new Error("empty body");
+          }
+          if (received !== contentLength) {
+            lengthMismatch = true;
+            throw new Error("content-length mismatch");
+          }
+        },
+      }),
+    );
+
+    try {
+      const [putResult, streamResult] = await Promise.allSettled([
+        env.BUCKET.put(key, fixedLength.readable, putOptions),
+        countedBody.pipeTo(fixedLength.writable),
+      ]);
+      if (putResult.status === "rejected") throw putResult.reason;
+      if (streamResult.status === "rejected") throw streamResult.reason;
+    } catch (error) {
+      if (tooLarge) return json({ error: "payload too large" }, 413);
+      if (empty) return json({ error: "empty body" }, 400);
+      if (lengthMismatch) return json({ error: "content-length mismatch" }, 400);
+      throw error;
+    }
+  } else {
+    // Existing specialized uploads stay buffered; their established limits are at most 50 MiB.
+    const body = await request.arrayBuffer();
+    if (body.byteLength === 0) return json({ error: "empty body" }, 400);
+    if (body.byteLength > max) return json({ error: "payload too large" }, 413);
+    await env.BUCKET.put(key, body, putOptions);
+  }
 
   const base = (env.PUBLIC_BASE_URL || "https://cli-tools.cpzhmlb.uk").replace(/\/$/, "");
   return json(
@@ -134,10 +216,16 @@ async function handleGet(key: string, env: Env, request: Request): Promise<Respo
   }
 
   const contentType = obj.httpMetadata?.contentType ?? "application/octet-stream";
+  const downloadFilename =
+    contentType.toLowerCase().trim() === "application/octet-stream"
+      ? obj.customMetadata?.["download-filename"]
+      : undefined;
   const headers = new Headers({
     "Content-Type": contentType,
     "X-Content-Type-Options": "nosniff",
-    "Content-Disposition": "inline",
+    "Content-Disposition": downloadFilename
+      ? downloadContentDisposition(downloadFilename)
+      : contentDispositionFor(contentType),
     "Accept-Ranges": "bytes",
   });
   if (bounds) {

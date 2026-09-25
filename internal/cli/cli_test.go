@@ -1,7 +1,11 @@
 package cli
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,6 +45,105 @@ func TestParseTTL(t *testing.T) {
 		}
 		if got != tt.want {
 			t.Errorf("ParseTTL(%q)=%q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestRunFileUpload(t *testing.T) {
+	var requests []struct {
+		contentType string
+		ttl         string
+		filename    string
+		body        []byte
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		requests = append(requests, struct {
+			contentType string
+			ttl         string
+			filename    string
+			body        []byte
+		}{r.Header.Get("Content-Type"), r.URL.Query().Get("ttl"), r.Header.Get("X-Download-Filename"), body})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"url":"https://example.test/upload"}`))
+	}))
+	defer server.Close()
+	t.Setenv("CLI_TOOLS_BASE_URL", server.URL)
+	t.Setenv("CLI_TOOLS_TOKEN", "test-token")
+
+	path := filepath.Join(t.TempDir(), "payload-☃.bin")
+	wantBody := []byte{0, 1, 2, 255}
+	if err := os.WriteFile(path, wantBody, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	oldStdout := os.Stdout
+	stdoutReader, stdoutWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = stdoutWriter
+	runErr := runFile([]string{path})
+	if runErr == nil {
+		runErr = runFile([]string{path, "--ttl", "48h"})
+	}
+	_ = stdoutWriter.Close()
+	os.Stdout = oldStdout
+	stdout, readErr := io.ReadAll(stdoutReader)
+	_ = stdoutReader.Close()
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(stdout) != "https://example.test/upload\nhttps://example.test/upload\n" {
+		t.Errorf("stdout=%q, want only upload URLs", stdout)
+	}
+	if len(requests) != 2 {
+		t.Fatalf("got %d requests, want 2", len(requests))
+	}
+	for i, wantTTL := range []string{"24h", "48h"} {
+		got := requests[i]
+		if got.contentType != "application/octet-stream" {
+			t.Errorf("request %d content type=%q, want application/octet-stream", i, got.contentType)
+		}
+		if got.ttl != wantTTL {
+			t.Errorf("request %d ttl=%q, want %q", i, got.ttl, wantTTL)
+		}
+		decodedFilename, err := base64.RawURLEncoding.DecodeString(got.filename)
+		if err != nil {
+			t.Errorf("request %d decode filename header %q: %v", i, got.filename, err)
+		} else {
+			if string(decodedFilename) != filepath.Base(path) {
+				t.Errorf("request %d filename=%q, want %q", i, decodedFilename, filepath.Base(path))
+			}
+			if base64.RawURLEncoding.EncodeToString(decodedFilename) != got.filename {
+				t.Errorf("request %d filename header is not unpadded base64url: %q", i, got.filename)
+			}
+		}
+		if string(got.body) != string(wantBody) {
+			t.Errorf("request %d body=%v, want %v", i, got.body, wantBody)
+		}
+	}
+}
+
+func TestValidateFileSize(t *testing.T) {
+	tests := []struct {
+		size    int64
+		wantErr bool
+	}{
+		{0, true},
+		{1, false},
+		{maxFileSize, false},
+		{maxFileSize + 1, true},
+	}
+	for _, tt := range tests {
+		if err := validateFileSize(tt.size); (err != nil) != tt.wantErr {
+			t.Errorf("validateFileSize(%d) error=%v, wantErr %v", tt.size, err, tt.wantErr)
 		}
 	}
 }

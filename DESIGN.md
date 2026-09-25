@@ -41,6 +41,8 @@ cli-tools auth clear
 
 cli-tools plan  <file.html>   [--ttl 7d]
 cli-tools image <file>        [--ttl 7d] [--quality 80] [--no-compress]
+cli-tools video <file>        [--ttl 7d]
+cli-tools file  <file>        [--ttl 24h]
 ```
 
 ### Behavior
@@ -49,13 +51,15 @@ cli-tools image <file>        [--ttl 7d] [--quality 80] [--no-compress]
 |---------|--------|
 | `plan` | Local path only; `.html` / `.htm`; upload raw as `text/html; charset=utf-8`; no stdin, no sanitize, no asset rewrite |
 | `image` | Accept `png`, `jpg`/`jpeg`, `webp` (static); always re-encode to WebP unless `--no-compress`; default quality 80; no resize; reject gif/animated |
+| `video` | Accept mp4, m4v, webm, mov; max 50 MB; try local ffmpeg re-encode above 10 MB |
+| `file` | Any non-empty local file; upload raw as `application/octet-stream`; 100 MB max; served as an attachment; default TTL 24h |
 | stdout | **URL only** on success |
 | stderr | Progress/diagnostics optional; **one line** `error: ...` on failure |
 | exit | `0` success; non-zero failure (stdout empty) |
 
 ### Flags
 
-- `--ttl` — default `7d`; allow `Nh` / `Nd`; **max 30d**; no forever
+- `--ttl` — default `7d` (generic file default `24h`); allow `Nh` / `Nd`; **max 30d**; no forever
 - `--quality` — image only, default 80
 - `--no-compress` — image only, upload original bytes + original content-type
 
@@ -66,6 +70,8 @@ cli-tools image <file>        [--ttl 7d] [--quality 80] [--no-compress]
 | plan | 2 MB |
 | image input | 10 MB |
 | image after WebP | 5 MB (reject if larger) |
+| video | 50 MB |
+| generic file | 100 MB |
 
 ### Auth resolution (CLI)
 
@@ -110,11 +116,11 @@ No CORS (CLI only). No list/delete APIs.
 
 - Headers:
   - `Authorization: Bearer <token>` (required)
-  - `Content-Type: text/html; charset=utf-8` \| `image/webp` \| other allowed image types if `--no-compress`
-  - TTL: `TTL: 7d` **or** query `?ttl=7d` (pick one in impl; prefer query `ttl` for simplicity)
-- Body: raw bytes
+  - `Content-Type: text/html; charset=utf-8` \| image/video types \| `application/octet-stream` for generic files
+  - TTL query: `?ttl=7d` (default `7d`; `application/octet-stream` defaults to `24h`; max `30d`)
+- Body: raw bytes; generic uploads require `Content-Length`
 - Worker generates id (`YYYY-MM-DD` UTC + UUID v4)
-- Worker enforces size caps + TTL max 30d + default 7d
+- Worker enforces per-type size caps; generic uploads stream into R2; TTL max is 30d
 
 ### Upload response `200`
 
@@ -131,7 +137,7 @@ Errors: `401` bad/missing token; `400` bad ttl/type/size; `413` too large. CLI m
 
 - Key: `YYYY-MM-DD/<uuid>`
 - HTTP Content-Type: as uploaded
-- Custom metadata: `expires-at` = unix seconds (string)
+- Custom metadata: `expires-at` = unix seconds (string); generic file `download-filename` = sanitized original basename
 
 ### GET response headers
 
@@ -141,17 +147,23 @@ Errors: `401` bad/missing token; `400` bad ttl/type/size; `413` too large. CLI m
 - `X-Content-Type-Options: nosniff`
 - `Content-Disposition: inline`
 
-**Image**
+**Image / video**
 
-- `Content-Type: image/webp` (or original if uncompressed)
+- Stored `Content-Type`
 - `X-Content-Type-Options: nosniff`
 - `Content-Disposition: inline`
+
+**Generic file**
+
+- `Content-Type: application/octet-stream`
+- `X-Content-Type-Options: nosniff`
+- `Content-Disposition: attachment` with the original basename and extension (`filename` + UTF-8 `filename*`)
 
 No CSP v1.
 
 ### TTL / cleanup
 
-1. Default TTL 7d; per-request override; max 30d
+1. Default TTL 7d (24h for generic files); per-request override; max 30d
 2. On GET: if `now > expires-at` → **404** and best-effort **delete** object
 3. R2 lifecycle backstop: delete objects older than **31 days**
 4. No D1/KV index; no cron lister in v1
